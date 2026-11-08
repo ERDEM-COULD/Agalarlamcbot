@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minecraft Bot Kontrol Paneli</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1e1e1e; color: #ddd; margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: auto; }
+        .card { background: #2d2d2d; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        h2 { border-bottom: 2px solid #4CAF50; padding-bottom: 10px; margin-top: 0; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+        .form-group input, .form-group select { width: 100%; padding: 8px; background: #3c3c3c; border: 1px solid #555; color: #fff; border-radius: 4px; box-sizing: border-box; }
+        .buttons { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+        button { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; color: white; transition: 0.2s; }
+        .btn-start { background: #4CAF50; }
+        .btn-start:hover { background: #45a049; }
+        .btn-stop { background: #f44336; }
+        .btn-stop:hover { background: #da190b; }
+        .btn-reboot { background: #ff9800; }
+        .btn-reboot:hover { background: #e68900; }
+        .btn-chat { background: #2196F3; }
+        .btn-chat:hover { background: #0b7dda; }
+        .btn-players { background: #9C27B0; }
+        .btn-players:hover { background: #7B1FA2; }
+        .btn-small { padding: 5px 10px; font-size: 12px; background: #555; }
+        .btn-small:hover { background: #777; }
+        .btn-danger { background: #f44336; }
+        .btn-danger:hover { background: #da190b; }
+        .btn-give { background: #4CAF50; }
+        .btn-give:hover { background: #45a049; }
+        .btn-download { background: #4CAF50; padding: 6px 14px; font-size: 13px; }
+        .btn-download:hover { background: #45a049; }
+        .status-panel { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .status-indicator { padding: 5px 15px; border-radius: 20px; font-weight: bold; }
+        .status-online { background: #4CAF50; color: white; }
+        .status-offline { background: #f44336; color: white; }
+        .status-starting { background: #ff9800; color: white; }
+        .timer { font-size: 1.2em; font-family: monospace; }
+        .terminal-container { background: #000; border-radius: 8px; padding: 10px; height: 300px; display: flex; flex-direction: column; }
+        .terminal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid #444; }
+        .terminal-output { flex-grow: 1; overflow-y: auto; font-family: 'Courier New', Courier, monospace; font-size: 14px; white-space: pre-wrap; word-break: break-all; }
+        .terminal-line { margin-bottom: 2px; }
+
+        .chat-container { background: #1a1a1a; border-radius: 8px; padding: 15px; max-height: 500px; overflow-y: auto; font-family: 'Segoe UI', sans-serif; font-size: 14px; }
+        .chat-empty { color: #888; font-style: italic; text-align: center; padding: 20px; }
+        .chat-entry { padding: 6px 10px; margin-bottom: 4px; border-radius: 4px; border-left: 3px solid; background: #252525; }
+        .chat-time { color: #888; font-size: 12px; margin-right: 8px; }
+        .chat-username { font-weight: bold; margin-right: 8px; }
+        .chat-message { color: #ddd; }
+
+        .inv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+        .inv-item { padding: 8px 10px; border-radius: 4px; border-left: 3px solid #FF9800; background: #252525; }
+        .inv-slot { color: #888; font-size: 11px; }
+        .inv-name { color: #FF9800; font-weight: bold; }
+        .inv-count { color: #4CAF50; font-weight: bold; float: right; }
+        .inv-contents { margin-top: 6px; padding-left: 10px; border-left: 2px solid #444; }
+        .inv-content-item { color: #aaa; font-size: 12px; padding: 2px 0; }
+
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-overlay.active { display: flex; }
+        .modal { background: #2d2d2d; padding: 20px; border-radius: 8px; width: 90%; max-width: 800px; max-height: 85vh; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.6); }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #4CAF50; }
+        .modal-header h2 { margin: 0; border: none; padding: 0; }
+        .modal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .btn-close { background: #f44336; padding: 6px 14px; font-size: 14px; }
+        .btn-close:hover { background: #da190b; }
+
+        /* Oyuncular listesi kaydırma */
+        .players-list { max-height: 250px; overflow-y: auto; padding-right: 5px; }
+        .player-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; margin-bottom: 6px; border-radius: 4px; background: #252525; border-left: 3px solid #9C27B0; flex-wrap: wrap; gap: 5px; }
+        .player-name { font-weight: bold; color: #9C27B0; min-width: 100px; }
+        .player-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+
+        .action-form { background: #252525; padding: 15px; border-radius: 6px; margin-top: 15px; border-left: 3px solid #4CAF50; }
+        .action-form h3 { margin-top: 0; color: #4CAF50; }
+        .form-row { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+        .form-row > div { flex: 1; min-width: 130px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Minecraft Bot Yönetim Paneli</h1>
+
+    <div class="card status-panel">
+        <div>
+            <span>Bot Durumu: </span>
+            <span id="statusBadge" class="status-indicator status-offline">Çevrimdışı</span>
+        </div>
+        <div class="timer">Süre: <span id="uptimeDisplay">00:00:00</span></div>
+    </div>
+
+    <div class="card">
+        <h2>Sunucu Bilgileri</h2>
+        <div class="form-group">
+            <label>Sunucu Adresi (IP)</label>
+            <input type="text" id="host" placeholder="örn: play.sunucum.com" value="localhost">
+        </div>
+        <div class="form-group">
+            <label>Port</label>
+            <input type="number" id="port" value="25565">
+        </div>
+        <div class="form-group">
+            <label>Bot Adı (Username)</label>
+            <input type="text" id="username" value="BenimBotum">
+        </div>
+        <div class="form-group">
+            <label>Sunucu Sürümü (Boş bırakılırsa otomatik algılar)</label>
+            <input type="text" id="version" placeholder="örn: 1.21.1">
+        </div>
+        <div class="buttons">
+            <button class="btn-start" onclick="startBot()">Botu Başlat</button>
+            <button class="btn-stop" onclick="stopBot()">Botu Durdur</button>
+            <button class="btn-reboot" onclick="rebootBot()">Botu Yeniden Başlat</button>
+            <button class="btn-chat" onclick="openChatModal()">Sohbeti Oku</button>
+            <button class="btn-players" onclick="openPlayersModal()">Oyuncuları Gör</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="terminal-header">
+            <h2 style="margin:0; border:none;">Terminal Çıktısı</h2>
+            <div class="modal-actions">
+                <button class="btn-download" onclick="downloadTerminal()">📥 TXT İndir</button>
+                <button class="btn-small" onclick="clearTerminal()">Temizle</button>
+            </div>
+        </div>
+        <div class="terminal-container">
+            <div id="terminalOutput" class="terminal-output"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Sohbet Modal -->
+<div id="chatModal" class="modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h2>Sohbet Geçmişi</h2>
+            <div class="modal-actions">
+                <button class="btn-download" onclick="downloadChatLogs()">📥 TXT İndir</button>
+                <button class="btn-small" onclick="clearChatLogs()">Geçmişi Temizle</button>
+                <button class="btn-close" onclick="closeChatModal()">Kapat</button>
+            </div>
+        </div>
+        <div id="chatContainer" class="chat-container"></div>
+    </div>
+</div>
+
+<!-- Oyuncular Modalı -->
+<div id="playersModal" class="modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h2>Oyuncular</h2>
+            <button class="btn-close" onclick="closePlayersModal()">Kapat</button>
+        </div>
+        <div id="playersList" class="players-list"></div>
+
+        <div class="action-form">
+            <h3>Eşya Ver</h3>
+            <div class="form-row">
+                <div><label>Oyuncu</label><input type="text" id="giveUsername" placeholder="Oyuncu adı"></div>
+                <div><label>Eşya (ID)</label><input type="text" id="giveItem" placeholder="örn: diamond_sword"></div>
+                <div><label>Miktar</label><input type="number" id="giveAmount" value="1" min="1"></div>
+                <div>
+                    <label>Hedef</label>
+                    <select id="giveTarget">
+                        <option value="inventory">Envanter</option>
+                        <option value="enderchest">Ender Sandığı</option>
+                    </select>
+                </div>
+            </div>
+            <button class="btn-give" onclick="giveItem()">Eşya Ver</button>
+        </div>
+
+        <div class="action-form" style="border-left-color:#f44336;">
+            <h3 style="color:#f44336;">Envanter Temizle</h3>
+            <div class="form-row">
+                <div><label>Oyuncu</label><input type="text" id="clearUsername" placeholder="Oyuncu adı"></div>
+                <div>
+                    <label>Hedef</label>
+                    <select id="clearTarget">
+                        <option value="inventory">Envanter</option>
+                        <option value="enderchest">Ender Sandığı</option>
+                    </select>
+                </div>
+            </div>
+            <button class="btn-danger" onclick="clearInventory()">Temizle</button>
+        </div>
+    </div>
+</div>
+
+<!-- Envanter Modalı -->
+<div id="inventoryModal" class="modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h2 id="invTitle">Envanter</h2>
+            <div class="modal-actions">
+                <button class="btn-download" id="invDownloadBtn" onclick="downloadInventory()">📥 TXT İndir</button>
+                <button class="btn-close" onclick="closeInventoryModal()">Kapat</button>
+            </div>
+        </div>
+        <div id="inventoryContent" class="chat-container">
+            <div class="chat-empty">Yükleniyor...</div>
+        </div>
+    </div>
+</div>
+
+<!-- Oyuncu Mesajları Modalı -->
+<div id="playerChatModal" class="modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h2 id="playerChatTitle">Mesaj Geçmişi</h2>
+            <div class="modal-actions">
+                <button class="btn-download" id="playerChatDownloadBtn" onclick="downloadPlayerChat()">📥 TXT İndir</button>
+                <button class="btn-close" onclick="closePlayerChatModal()">Kapat</button>
+            </div>
+        </div>
+        <div id="playerChatContent" class="chat-container"></div>
+    </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+    const socket = io();
+    let startTime = null;
+    let timerInterval = null;
+    let currentInvUsername = null;
+    let currentPlayerChatUsername = null;
+
+    const statusBadge = document.getElementById('statusBadge');
+    const uptimeDisplay = document.getElementById('uptimeDisplay');
+    const terminalOutput = document.getElementById('terminalOutput');
+
+    const hostInput = document.getElementById('host');
+    const portInput = document.getElementById('port');
+    const usernameInput = document.getElementById('username');
+    const versionInput = document.getElementById('version');
+
+    if (localStorage.getItem('mc_bot_config')) {
+        const saved = JSON.parse(localStorage.getItem('mc_bot_config'));
+        hostInput.value = saved.host || 'localhost';
+        portInput.value = saved.port || 25565;
+        usernameInput.value = saved.username || 'BenimBotum';
+        versionInput.value = saved.version || '';
+    }
+
+    function saveConfig() {
+        localStorage.setItem('mc_bot_config', JSON.stringify({
+            host: hostInput.value, port: portInput.value,
+            username: usernameInput.value, version: versionInput.value
+        }));
+    }
+    [hostInput, portInput, usernameInput, versionInput].forEach(el => el.addEventListener('input', saveConfig));
+
+    function addLogToTerminal(message) {
+        const line = document.createElement('div');
+        line.className = 'terminal-line';
+        line.textContent = message;
+        terminalOutput.appendChild(line);
+        terminalOutput.scrollTop = terminalOutput.scrollHeight;
+    }
+
+    function clearTerminal() { terminalOutput.innerHTML = ''; }
+
+    function updateStatusUI(status) {
+        statusBadge.textContent = status === 'online' ? 'Çevrimiçi' : (status === 'starting' ? 'Başlatılıyor...' : 'Çevrimdışı');
+        statusBadge.className = 'status-indicator ' +
+            (status === 'online' ? 'status-online' : (status === 'starting' ? 'status-starting' : 'status-offline'));
+    }
+
+    function startTimer(startTimestamp) {
+        if (timerInterval) clearInterval(timerInterval);
+        startTime = startTimestamp;
+        if (!startTime) { uptimeDisplay.textContent = '00:00:00'; return; }
+        function tick() {
+            if (!startTime) return;
+            const diff = Math.floor((Date.now() - startTime) / 1000);
+            const h = String(Math.floor(diff / 3600)).padStart(2, '0');
+            const m = String(Math.floor((diff % 3600) / 60)).padStart(2, '0');
+            const s = String(diff % 60).padStart(2, '0');
+            uptimeDisplay.textContent = `${h}:${m}:${s}`;
+        }
+        tick();
+        timerInterval = setInterval(tick, 1000);
+    }
+
+    socket.on('bot-status', (status) => updateStatusUI(status));
+    socket.on('connection-time', (ts) => {
+        if (ts) startTimer(ts);
+        else { if (timerInterval) clearInterval(timerInterval); uptimeDisplay.textContent = '00:00:00'; }
+    });
+    socket.on('terminal-log', (msg) => addLogToTerminal(msg));
+
+    fetch('/api/state')
+        .then(res => res.json())
+        .then(data => {
+            if (data.logs && data.logs.length > 0) data.logs.forEach(log => addLogToTerminal(log));
+            updateStatusUI(data.status);
+            if (data.startTime) startTimer(data.startTime);
+            if (data.config && data.config.host) {
+                hostInput.value = data.config.host;
+                portInput.value = data.config.port;
+                usernameInput.value = data.config.username;
+                versionInput.value = data.config.version || '';
+                saveConfig();
+            }
+        })
+        .catch(err => console.error('Durum yüklenirken hata:', err));
+
+    // Terminal TXT indir
+    function downloadTerminal() {
+        const link = document.createElement('a');
+        link.href = '/api/terminal/download';
+        link.download = '';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    // --- Sohbet ---
+    function openChatModal() { document.getElementById('chatModal').classList.add('active'); loadChatLogs(); }
+    function closeChatModal() { document.getElementById('chatModal').classList.remove('active'); }
+
+    function getColorForUsername(username) {
+        let hash = 0;
+        for (let i = 0; i < username.length; i++) hash = username.charCodeAt(i) + ((hash << 5) - hash);
+        return `hsl(${Math.abs(hash) % 360}, 70%, 65%)`;
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function renderChatEntry(entry) {
+        const color = getColorForUsername(entry.username);
+        const div = document.createElement('div');
+        div.className = 'chat-entry';
+        div.style.borderLeftColor = color;
+        const tag = entry.type === 'whisper' ? '<span style="color:#888;font-size:10px;"> (özel)</span>' : '';
+        div.innerHTML =
+            `<span class="chat-time">${escapeHtml(entry.time || '')}</span>` +
+            `<span class="chat-username" style="color:${color};">&lt;${escapeHtml(entry.username)}&gt;</span>` +
+            `<span class="chat-message">${escapeHtml(entry.message)}</span>${tag}`;
+        return div;
+    }
+
+    function loadChatLogs() {
+        const container = document.getElementById('chatContainer');
+        container.innerHTML = '<div class="chat-empty">Yükleniyor...</div>';
+        fetch('/api/chat-logs')
+            .then(res => res.json())
+            .then(logs => {
+                if (!logs || logs.length === 0) { container.innerHTML = '<div class="chat-empty">Henüz sohbet kaydı yok.</div>'; return; }
+                container.innerHTML = '';
+                logs.forEach(entry => container.appendChild(renderChatEntry(entry)));
+            })
+            .catch(err => container.innerHTML = `<div class="chat-empty">Hata: ${escapeHtml(err.message)}</div>`);
+    }
+
+    function downloadChatLogs() {
+        const link = document.createElement('a');
+        link.href = '/api/chat-logs/download';
+        link.download = '';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    function clearChatLogs() {
+        if (!confirm('Tüm sohbet geçmişi silinecek. Emin misiniz?')) return;
+        fetch('/api/clear-chat-logs', { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) alert('Hata: ' + data.error);
+                else loadChatLogs();
+            })
+            .catch(err => alert('İstek hatası: ' + err));
+    }
+
+    // --- Oyuncular ---
+    function openPlayersModal() {
+        const list = document.getElementById('playersList');
+        list.innerHTML = '<div class="chat-empty">Yükleniyor...</div>';
+        document.getElementById('playersModal').classList.add('active');
+
+        fetch('/api/players')
+            .then(res => res.json())
+            .then(players => {
+                if (!players || players.length === 0) {
+                    list.innerHTML = '<div class="chat-empty">Oyuncu bulunamadı.</div>';
+                    return;
+                }
+                list.innerHTML = '';
+                players.forEach(p => {
+                    const row = document.createElement('div');
+                    row.className = 'player-row';
+                    row.innerHTML = `
+                        <span class="player-name">${escapeHtml(p)}</span>
+                        <div class="player-actions">
+                            <button class="btn-small" onclick="viewInventory('${escapeHtml(p)}', 'inventory')">Envanter</button>
+                            <button class="btn-small" onclick="viewInventory('${escapeHtml(p)}', 'enderchest')">Ender</button>
+                            <button class="btn-small" onclick="viewPlayerChat('${escapeHtml(p)}')">Mesajlar</button>
+                            <button class="btn-small" onclick="prefillGive('${escapeHtml(p)}')">Eşya Ver</button>
+                            <button class="btn-small btn-danger" onclick="prefillClear('${escapeHtml(p)}')">Temizle</button>
+                        </div>
+                    `;
+                    list.appendChild(row);
+                });
+            })
+            .catch(err => list.innerHTML = `<div class="chat-empty">Hata: ${escapeHtml(err.message)}</div>`);
+    }
+
+    function closePlayersModal() { document.getElementById('playersModal').classList.remove('active'); }
+
+    function prefillGive(username) {
+        document.getElementById('giveUsername').value = username;
+        document.getElementById('giveUsername').focus();
+    }
+
+    function prefillClear(username) {
+        document.getElementById('clearUsername').value = username;
+        document.getElementById('clearUsername').focus();
+    }
+
+    // --- Eşya Verme ---
+    function giveItem() {
+        const username = document.getElementById('giveUsername').value.trim();
+        const item = document.getElementById('giveItem').value.trim();
+        const amount = document.getElementById('giveAmount').value;
+        const target = document.getElementById('giveTarget').value;
+
+        if (!username || !item) { alert('Oyuncu adı ve eşya zorunludur.'); return; }
+
+        fetch('/api/give', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, item, amount, target })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) alert('Hata: ' + data.error);
+            else alert('Komut gönderildi: ' + (data.message || 'OK'));
+        })
+        .catch(err => alert('İstek hatası: ' + err));
+    }
+
+    function clearInventory() {
+        const username = document.getElementById('clearUsername').value.trim();
+        const target = document.getElementById('clearTarget').value;
+        if (!username) { alert('Oyuncu adı zorunludur.'); return; }
+        if (!confirm(`"${username}" oyuncusunun ${target === 'enderchest' ? 'ender sandığı' : 'envanteri'} temizlenecek. Emin misiniz?`)) return;
+
+        fetch('/api/clear', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, target })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) alert('Hata: ' + data.error);
+            else alert('Komut gönderildi: ' + (data.message || 'OK'));
+        })
+        .catch(err => alert('İstek hatası: ' + err));
+    }
+
+    // --- Envanter Görüntüleme ---
+    function viewInventory(username, target) {
+        currentInvUsername = username;
+        currentInvTarget = target;
+        const content = document.getElementById('inventoryContent');
+        const title = document.getElementById('invTitle');
+        const label = target === 'enderchest' ? 'Ender Sandığı' : 'Envanter';
+        title.textContent = `${username} - ${label}`;
+        content.innerHTML = '<div class="chat-empty">Okunuyor...</div>';
+        document.getElementById('inventoryModal').classList.add('active');
+
+        const endpoint = target === 'enderchest' ? '/api/endersee' : '/api/invsee';
+
+        fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) { content.innerHTML = `<div class="chat-empty">Hata: ${escapeHtml(data.error)}</div>`; return; }
+            if (!data.inventory || data.inventory.length === 0) {
+                content.innerHTML = '<div class="chat-empty">İçerik boş.</div>';
+                return;
+            }
+            content.innerHTML = '';
+            const grid = document.createElement('div');
+            grid.className = 'inv-grid';
+            data.inventory.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'inv-item';
+                let html = `<div class="inv-slot">Slot ${item.slot}</div>` +
+                    `<div><span class="inv-name">${escapeHtml(item.displayName || item.name)}</span>` +
+                    `<span class="inv-count">x${item.count}</span></div>`;
+                if (item.contents && item.contents.length > 0) {
+                    html += '<div class="inv-contents">';
+                    item.contents.forEach(c => {
+                        html += `<div class="inv-content-item">[${c.slot}] ${escapeHtml(c.displayName || c.name)} x${c.count}</div>`;
+                    });
+                    html += '</div>';
+                }
+                div.innerHTML = html;
+                grid.appendChild(div);
+            });
+            content.appendChild(grid);
+        })
+        .catch(err => content.innerHTML = `<div class="chat-empty">Hata: ${escapeHtml(err.message)}</div>`);
+    }
+
+    function closeInventoryModal() { document.getElementById('inventoryModal').classList.remove('active'); }
+
+    function downloadInventory() {
+        if (!currentInvUsername) return;
+        fetch('/api/invsee/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: currentInvUsername })
+        })
+        .then(res => {
+            if (!res.ok) throw new Error('İndirme başarısız');
+            return res.blob();
+        })
+        .then(blob => {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `envanter_${currentInvUsername}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        })
+        .catch(err => alert('İndirme hatası: ' + err.message));
+    }
+
+    // --- Oyuncu Mesajları ---
+    function viewPlayerChat(username) {
+        currentPlayerChatUsername = username;
+        const content = document.getElementById('playerChatContent');
+        document.getElementById('playerChatTitle').textContent = `${username} - Mesaj Geçmişi`;
+        content.innerHTML = '<div class="chat-empty">Yükleniyor...</div>';
+        document.getElementById('playerChatModal').classList.add('active');
+
+        fetch(`/api/chat-logs/${encodeURIComponent(username)}`)
+            .then(res => res.json())
+            .then(logs => {
+                if (!logs || logs.length === 0) { content.innerHTML = '<div class="chat-empty">Bu oyuncunun mesajı yok.</div>'; return; }
+                content.innerHTML = '';
+                logs.forEach(entry => content.appendChild(renderChatEntry(entry)));
+            })
+            .catch(err => content.innerHTML = `<div class="chat-empty">Hata: ${escapeHtml(err.message)}</div>`);
+    }
+
+    function closePlayerChatModal() { document.getElementById('playerChatModal').classList.remove('active'); }
+
+    function downloadPlayerChat() {
+        if (!currentPlayerChatUsername) return;
+        const link = document.createElement('a');
+        link.href = `/api/chat-logs/${encodeURIComponent(currentPlayerChatUsername)}/download`;
+        link.download = '';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    // Modal dışına tıklayınca kapat
+    ['chatModal', 'playersModal', 'inventoryModal', 'playerChatModal'].forEach(id => {
+        document.getElementById(id).addEventListener('click', (e) => {
+            if (e.target.id === id) document.getElementById(id).classList.remove('active');
+        });
+    });
+
+    // --- Bot Kontrol ---
+    function startBot() {
+        const config = {
+            host: hostInput.value, port: portInput.value,
+            username: usernameInput.value, version: versionInput.value || undefined
+        };
+        saveConfig();
+        fetch('/api/start', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+        })
+        .then(res => res.json())
+        .then(data => { if (data.error) alert('Hata: ' + data.error); })
+        .catch(err => alert('İstek hatası: ' + err));
+    }
+
+    function stopBot() {
+        fetch('/api/stop', { method: 'POST' })
+            .then(res => res.json())
+            .then(data => { if (data.error) alert('Hata: ' + data.error); });
+    }
+
+    function rebootBot() {
+        fetch('/api/reboot', { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) alert('Hata: ' + data.error);
+                else clearTerminal();
+            });
+    }
+</script>
+</body>
+</html>
