@@ -19,6 +19,8 @@ let connectionStartTime = null;
 let moveInterval = null;
 let moveTimeout1 = null;
 let moveTimeout2 = null;
+let reconnectTimeout = null;
+let manualStop = false; // Kullanıcı "durdur" dediyse otomatik yeniden bağlanma yapma
 let currentConfig = { host: '', port: 25565, username: 'Bot', version: false };
 
 let logHistory = [];
@@ -94,8 +96,20 @@ function startMovement() {
     addLog('Hareket döngüsü başlatıldı (yavaş tempoda ileri-geri).');
 }
 
+// Otomatik yeniden bağlanma zamanlayıcısını temizle
+function clearReconnectTimer() {
+    if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = null;
+    }
+}
+
 function startBot(config) {
     if (bot) { addLog('Bot zaten çalışıyor, tekrar başlatma iptal edildi.'); return; }
+
+    // Yeni manuel başlatmada otomatik yeniden bağlanma bayrağını sıfırla
+    manualStop = false;
+    clearReconnectTimer();
 
     currentConfig = config;
     botStatus = 'starting';
@@ -128,6 +142,7 @@ function startBot(config) {
             }, 3000);
         });
 
+        // Bot oyundan ayrıldığında otomatik yeniden bağlan
         bot.on('end', (reason) => {
             addLog(`Bot oyundan ayrıldı. Sebep: ${reason || 'Bilinmiyor'}`);
             clearMovement();
@@ -136,13 +151,30 @@ function startBot(config) {
             connectionStartTime = null;
             io.emit('bot-status', botStatus);
             io.emit('connection-time', null);
+
+            // Manuel durdurulmadıysa 5 saniye sonra tekrar bağlan
+            if (!manualStop && currentConfig.host && currentConfig.username) {
+                addLog('5 saniye içinde otomatik yeniden bağlanılacak...');
+                clearReconnectTimer();
+                reconnectTimeout = setTimeout(() => {
+                    reconnectTimeout = null;
+                    if (!manualStop && !bot) {
+                        addLog('Otomatik yeniden bağlanma başlatılıyor...');
+                        startBot(currentConfig);
+                    }
+                }, 5000);
+            } else {
+                addLog('Otomatik yeniden bağlanma devre dışı (manuel durdurma).');
+            }
         });
 
         bot.on('kicked', (reason) => {
             addLog(`Bot sunucudan atıldı: ${typeof reason === 'string' ? reason : JSON.stringify(reason)}`);
         });
 
-        bot.on('error', (err) => { addLog(`Bot Hatası: ${err.message}`); });
+        bot.on('error', (err) => {
+            addLog(`Bot Hatası: ${err.message}`);
+        });
 
         bot.on('chat', (username, message) => {
             if (username === bot.username) return;
@@ -161,13 +193,31 @@ function startBot(config) {
         botStatus = 'offline';
         io.emit('bot-status', botStatus);
         bot = null;
+
+        // Bot oluşturulamazsa bile otomatik yeniden bağlanmayı dene
+        if (!manualStop && currentConfig.host && currentConfig.username) {
+            addLog('Bot oluşturulamadı, 5 saniye sonra yeniden denenecek...');
+            clearReconnectTimer();
+            reconnectTimeout = setTimeout(() => {
+                reconnectTimeout = null;
+                if (!manualStop && !bot) {
+                    startBot(currentConfig);
+                }
+            }, 5000);
+        }
     }
 }
 
 function stopBot(manual = true) {
     clearMovement();
+    clearReconnectTimer();
+
+    if (manual) {
+        manualStop = true; // Otomatik yeniden bağlanmayı engelle
+        addLog('Bot durduruluyor... (otomatik yeniden bağlanma devre dışı)');
+    }
+
     if (bot) {
-        if (manual) addLog('Bot durduruluyor...');
         try { bot.quit(); } catch (e) {}
         bot = null;
     }
@@ -224,11 +274,9 @@ function extractWindowItems(window) {
 function extractContainerContents(item) {
     if (!item || !item.nbt) return null;
     try {
-        // Shulker box veya bundle nbt verisinde "Items" listesi varsa
         const nbtData = item.nbt.value || item.nbt;
         let itemsList = null;
-        
-        // Farklı nbt yapılarını kontrol et
+
         if (nbtData.BlockEntityTag && nbtData.BlockEntityTag.value && nbtData.BlockEntityTag.value.Items) {
             itemsList = nbtData.BlockEntityTag.value.Items.value ? nbtData.BlockEntityTag.value.Items.value.value : null;
         } else if (nbtData.Items) {
@@ -309,7 +357,7 @@ app.get('/api/players', (req, res) => {
     res.json(players);
 });
 
-// Envanter görüntüleme (shulker/kese içeriği dahil)
+// Envanter görüntüleme
 app.post('/api/invsee', async (req, res) => {
     const { username } = req.body;
     if (!username) return res.status(400).json({ error: 'Oyuncu adı gerekli.' });
@@ -319,12 +367,9 @@ app.post('/api/invsee', async (req, res) => {
         win.slots.forEach((item, index) => {
             if (item && !isFillerItem(item)) {
                 const entry = {
-                    slot: index,
-                    name: item.name,
-                    count: item.count,
+                    slot: index, name: item.name, count: item.count,
                     displayName: item.displayName || item.name
                 };
-                // Shulker veya bundle ise içeriği oku
                 if (item.name.includes('shulker_box') || item.name === 'bundle') {
                     const contents = extractContainerContents(item);
                     if (contents) entry.contents = contents;
@@ -350,9 +395,7 @@ app.post('/api/invsee/download', async (req, res) => {
         win.slots.forEach((item, index) => {
             if (item && !isFillerItem(item)) {
                 const entry = {
-                    slot: index,
-                    name: item.name,
-                    count: item.count,
+                    slot: index, name: item.name, count: item.count,
                     displayName: item.displayName || item.name
                 };
                 if (item.name.includes('shulker_box') || item.name === 'bundle') {
@@ -412,9 +455,7 @@ app.post('/api/endersee', async (req, res) => {
         win.slots.forEach((item, index) => {
             if (item && !isFillerItem(item)) {
                 const entry = {
-                    slot: index,
-                    name: item.name,
-                    count: item.count,
+                    slot: index, name: item.name, count: item.count,
                     displayName: item.displayName || item.name
                 };
                 if (item.name.includes('shulker_box') || item.name === 'bundle') {
@@ -579,26 +620,34 @@ app.post('/api/start', (req, res) => {
 
 app.post('/api/stop', (req, res) => {
     if (!bot) return res.status(400).json({ error: 'Bot zaten çevrimdışı.' });
-    stopBot();
+    stopBot(true);
     res.json({ message: 'Durdurma komutu alındı.' });
 });
 
 app.post('/api/reboot', (req, res) => {
     addLog('Yeniden başlatma komutu alındı...');
     const configToUse = { ...currentConfig };
+
+    // Manuel yeniden başlatma: otomatik bağlanmayı geçici olarak durdur
+    manualStop = true;
+    clearReconnectTimer();
     clearMovement();
+
     if (bot) { try { bot.quit(); } catch (e) {} bot = null; }
     botStatus = 'starting';
     io.emit('bot-status', botStatus);
     addLog('Bot kapatıldı, 2 saniye sonra yeniden başlatılacak...');
+
     setTimeout(() => {
-        if (configToUse.host && configToUse.username) startBot(configToUse);
-        else {
+        if (configToUse.host && configToUse.username) {
+            startBot(configToUse);
+        } else {
             addLog('Hata: Yeniden başlatma için geçerli konfigürasyon bulunamadı.');
             botStatus = 'offline';
             io.emit('bot-status', botStatus);
         }
     }, 2000);
+
     res.json({ message: 'Yeniden başlatma komutu alındı.' });
 });
 
@@ -608,8 +657,8 @@ io.on('connection', (socket) => {
     socket.emit('connection-time', connectionStartTime);
 });
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`Web paneli http://localhost:${PORT} adresinde çalışıyor.`);
-    addLog('Sunucu başlatıldı. Bot henüz çevrimdışı.');
+    addLog(`Sunucu başlatıldı. Bot henüz çevrimdışı. (Port: ${PORT})`);
 });
