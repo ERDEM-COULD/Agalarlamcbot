@@ -20,7 +20,8 @@ let moveInterval = null;
 let moveTimeout1 = null;
 let moveTimeout2 = null;
 let reconnectTimeout = null;
-let manualStop = false; // Kullanıcı "durdur" dediyse otomatik yeniden bağlanma yapma
+let manualStop = false;
+let autoReconnectEnabled = true; // 🆕 Otomatik yeniden bağlanma aç/kapa
 let currentConfig = { host: '', port: 25565, username: 'Bot', version: false };
 
 let logHistory = [];
@@ -96,7 +97,6 @@ function startMovement() {
     addLog('Hareket döngüsü başlatıldı (yavaş tempoda ileri-geri).');
 }
 
-// Otomatik yeniden bağlanma zamanlayıcısını temizle
 function clearReconnectTimer() {
     if (reconnectTimeout) {
         clearTimeout(reconnectTimeout);
@@ -107,7 +107,6 @@ function clearReconnectTimer() {
 function startBot(config) {
     if (bot) { addLog('Bot zaten çalışıyor, tekrar başlatma iptal edildi.'); return; }
 
-    // Yeni manuel başlatmada otomatik yeniden bağlanma bayrağını sıfırla
     manualStop = false;
     clearReconnectTimer();
 
@@ -142,7 +141,6 @@ function startBot(config) {
             }, 3000);
         });
 
-        // Bot oyundan ayrıldığında otomatik yeniden bağlan
         bot.on('end', (reason) => {
             addLog(`Bot oyundan ayrıldı. Sebep: ${reason || 'Bilinmiyor'}`);
             clearMovement();
@@ -152,19 +150,25 @@ function startBot(config) {
             io.emit('bot-status', botStatus);
             io.emit('connection-time', null);
 
-            // Manuel durdurulmadıysa 5 saniye sonra tekrar bağlan
-            if (!manualStop && currentConfig.host && currentConfig.username) {
+            // 🆕 Otomatik yeniden bağlanma kontrolü
+            if (manualStop) {
+                addLog('Otomatik yeniden bağlanma devre dışı (manuel durdurma).');
+                return;
+            }
+            if (!autoReconnectEnabled) {
+                addLog('Otomatik yeniden bağlanma kapalı (panelden kapatıldı).');
+                return;
+            }
+            if (currentConfig.host && currentConfig.username) {
                 addLog('5 saniye içinde otomatik yeniden bağlanılacak...');
                 clearReconnectTimer();
                 reconnectTimeout = setTimeout(() => {
                     reconnectTimeout = null;
-                    if (!manualStop && !bot) {
+                    if (!manualStop && autoReconnectEnabled && !bot) {
                         addLog('Otomatik yeniden bağlanma başlatılıyor...');
                         startBot(currentConfig);
                     }
                 }, 5000);
-            } else {
-                addLog('Otomatik yeniden bağlanma devre dışı (manuel durdurma).');
             }
         });
 
@@ -194,13 +198,12 @@ function startBot(config) {
         io.emit('bot-status', botStatus);
         bot = null;
 
-        // Bot oluşturulamazsa bile otomatik yeniden bağlanmayı dene
-        if (!manualStop && currentConfig.host && currentConfig.username) {
+        if (!manualStop && autoReconnectEnabled && currentConfig.host && currentConfig.username) {
             addLog('Bot oluşturulamadı, 5 saniye sonra yeniden denenecek...');
             clearReconnectTimer();
             reconnectTimeout = setTimeout(() => {
                 reconnectTimeout = null;
-                if (!manualStop && !bot) {
+                if (!manualStop && autoReconnectEnabled && !bot) {
                     startBot(currentConfig);
                 }
             }, 5000);
@@ -213,7 +216,7 @@ function stopBot(manual = true) {
     clearReconnectTimer();
 
     if (manual) {
-        manualStop = true; // Otomatik yeniden bağlanmayı engelle
+        manualStop = true;
         addLog('Bot durduruluyor... (otomatik yeniden bağlanma devre dışı)');
     }
 
@@ -246,7 +249,6 @@ async function openInventoryWindow(command, timeoutMs = 5000) {
     });
 }
 
-// Dolgu eşyalarını filtrele
 function isFillerItem(item) {
     if (!item || !item.name) return true;
     if (item.name.includes('stained_glass_pane')) return true;
@@ -254,15 +256,12 @@ function isFillerItem(item) {
     return false;
 }
 
-// Pencere slotlarını okunabilir formata çevir
 function extractWindowItems(window) {
     const items = [];
     window.slots.forEach((item, index) => {
         if (item && !isFillerItem(item)) {
             items.push({
-                slot: index,
-                name: item.name,
-                count: item.count,
+                slot: index, name: item.name, count: item.count,
                 displayName: item.displayName || item.name
             });
         }
@@ -270,7 +269,6 @@ function extractWindowItems(window) {
     return items;
 }
 
-// Shulker box veya bundle içeriğini okuma (nbt üzerinden)
 function extractContainerContents(item) {
     if (!item || !item.nbt) return null;
     try {
@@ -320,8 +318,22 @@ app.get('/api/state', (req, res) => {
         status: botStatus,
         startTime: connectionStartTime,
         logs: logHistory,
-        config: currentConfig
+        config: currentConfig,
+        autoReconnectEnabled: autoReconnectEnabled // 🆕 Durumu frontend'e bildir
     });
+});
+
+// 🆕 Otomatik yeniden bağlanma aç/kapa
+app.post('/api/auto-reconnect', (req, res) => {
+    const { enabled } = req.body;
+    autoReconnectEnabled = !!enabled;
+    addLog(`Otomatik yeniden bağlanma ${autoReconnectEnabled ? 'AÇILDI' : 'KAPATILDI'}.`);
+    if (!autoReconnectEnabled) {
+        clearReconnectTimer();
+        addLog('Bekleyen yeniden bağlanma zamanlayıcısı iptal edildi.');
+    }
+    io.emit('auto-reconnect-status', autoReconnectEnabled);
+    res.json({ autoReconnectEnabled });
 });
 
 // Terminal TXT indir
@@ -357,7 +369,6 @@ app.get('/api/players', (req, res) => {
     res.json(players);
 });
 
-// Envanter görüntüleme
 app.post('/api/invsee', async (req, res) => {
     const { username } = req.body;
     if (!username) return res.status(400).json({ error: 'Oyuncu adı gerekli.' });
@@ -385,7 +396,6 @@ app.post('/api/invsee', async (req, res) => {
     }
 });
 
-// Envanter TXT indir
 app.post('/api/invsee/download', async (req, res) => {
     const { username } = req.body;
     if (!username) return res.status(400).json({ error: 'Oyuncu adı gerekli.' });
@@ -508,7 +518,6 @@ app.post('/api/clear', async (req, res) => {
     }
 });
 
-// Sohbet geçmişi
 app.get('/api/chat-logs', (req, res) => {
     const sorted = [...chatLogs].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
     res.json(sorted);
@@ -521,7 +530,6 @@ app.get('/api/chat-logs/:username', (req, res) => {
     res.json(sorted);
 });
 
-// Kişiye özel mesajları TXT indir
 app.get('/api/chat-logs/:username/download', (req, res) => {
     const { username } = req.params;
     try {
@@ -561,7 +569,6 @@ app.get('/api/chat-logs/:username/download', (req, res) => {
     }
 });
 
-// Tüm sohbet TXT indir
 app.get('/api/chat-logs/download', (req, res) => {
     try {
         const sorted = [...chatLogs].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
@@ -609,7 +616,6 @@ app.post('/api/clear-chat-logs', (req, res) => {
     });
 });
 
-// Bot kontrol
 app.post('/api/start', (req, res) => {
     const { host, port, username, version } = req.body;
     if (!host || !username) return res.status(400).json({ error: 'Sunucu adresi ve bot adı zorunludur.' });
@@ -628,7 +634,6 @@ app.post('/api/reboot', (req, res) => {
     addLog('Yeniden başlatma komutu alındı...');
     const configToUse = { ...currentConfig };
 
-    // Manuel yeniden başlatma: otomatik bağlanmayı geçici olarak durdur
     manualStop = true;
     clearReconnectTimer();
     clearMovement();
@@ -655,6 +660,7 @@ io.on('connection', (socket) => {
     addLog('Web paneli bağlandı.');
     socket.emit('bot-status', botStatus);
     socket.emit('connection-time', connectionStartTime);
+    socket.emit('auto-reconnect-status', autoReconnectEnabled);
 });
 
 const PORT = process.env.PORT || 3000;
