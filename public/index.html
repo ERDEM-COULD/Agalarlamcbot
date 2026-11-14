@@ -67,7 +67,6 @@
         .btn-close { background: #f44336; padding: 6px 14px; font-size: 14px; }
         .btn-close:hover { background: #da190b; }
 
-        /* Oyuncular listesi kaydırma */
         .players-list { max-height: 250px; overflow-y: auto; padding-right: 5px; }
         .player-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; margin-bottom: 6px; border-radius: 4px; background: #252525; border-left: 3px solid #9C27B0; flex-wrap: wrap; gap: 5px; }
         .player-name { font-weight: bold; color: #9C27B0; min-width: 100px; }
@@ -77,6 +76,17 @@
         .action-form h3 { margin-top: 0; color: #4CAF50; }
         .form-row { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
         .form-row > div { flex: 1; min-width: 130px; }
+
+        /* 🆕 Otomatik yeniden bağlanma toggle */
+        .auto-reconnect-row { display: flex; align-items: center; gap: 10px; padding: 10px 15px; background: #252525; border-radius: 6px; margin-top: 15px; border-left: 3px solid #2196F3; }
+        .auto-reconnect-row label { cursor: pointer; font-weight: bold; user-select: none; }
+        .switch { position: relative; display: inline-block; width: 50px; height: 26px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; transition: .3s; border-radius: 26px; }
+        .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
+        input:checked + .slider { background-color: #4CAF50; }
+        input:checked + .slider:before { transform: translateX(24px); }
+        .auto-reconnect-status { font-size: 13px; color: #888; }
     </style>
 </head>
 <body>
@@ -115,6 +125,18 @@
             <button class="btn-reboot" onclick="rebootBot()">Botu Yeniden Başlat</button>
             <button class="btn-chat" onclick="openChatModal()">Sohbeti Oku</button>
             <button class="btn-players" onclick="openPlayersModal()">Oyuncuları Gör</button>
+        </div>
+
+        <!-- 🆕 Otomatik Yeniden Bağlanma Anahtarı -->
+        <div class="auto-reconnect-row">
+            <label class="switch">
+                <input type="checkbox" id="autoReconnectToggle" checked onchange="toggleAutoReconnect()">
+                <span class="slider"></span>
+            </label>
+            <label for="autoReconnectToggle" onclick="document.getElementById('autoReconnectToggle').click();">
+                Otomatik Yeniden Bağlanma (5 saniye içinde)
+            </label>
+            <span id="autoReconnectStatus" class="auto-reconnect-status">Aktif</span>
         </div>
     </div>
 
@@ -226,6 +248,7 @@
     let startTime = null;
     let timerInterval = null;
     let currentInvUsername = null;
+    let currentInvTarget = null;
     let currentPlayerChatUsername = null;
 
     const statusBadge = document.getElementById('statusBadge');
@@ -236,6 +259,9 @@
     const portInput = document.getElementById('port');
     const usernameInput = document.getElementById('username');
     const versionInput = document.getElementById('version');
+
+    const autoReconnectToggle = document.getElementById('autoReconnectToggle');
+    const autoReconnectStatus = document.getElementById('autoReconnectStatus');
 
     if (localStorage.getItem('mc_bot_config')) {
         const saved = JSON.parse(localStorage.getItem('mc_bot_config'));
@@ -285,12 +311,38 @@
         timerInterval = setInterval(tick, 1000);
     }
 
+    // 🆕 Otomatik yeniden bağlanma durumunu güncelle
+    function updateAutoReconnectUI(enabled) {
+        autoReconnectToggle.checked = enabled;
+        autoReconnectStatus.textContent = enabled ? 'Aktif' : 'Kapalı';
+        autoReconnectStatus.style.color = enabled ? '#4CAF50' : '#f44336';
+    }
+
+    // 🆕 Otomatik yeniden bağlanma toggle
+    function toggleAutoReconnect() {
+        const enabled = autoReconnectToggle.checked;
+        fetch('/api/auto-reconnect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        })
+        .then(res => res.json())
+        .then(data => {
+            updateAutoReconnectUI(data.autoReconnectEnabled);
+        })
+        .catch(err => {
+            alert('İstek hatası: ' + err);
+            autoReconnectToggle.checked = !enabled; // Geri al
+        });
+    }
+
     socket.on('bot-status', (status) => updateStatusUI(status));
     socket.on('connection-time', (ts) => {
         if (ts) startTimer(ts);
         else { if (timerInterval) clearInterval(timerInterval); uptimeDisplay.textContent = '00:00:00'; }
     });
     socket.on('terminal-log', (msg) => addLogToTerminal(msg));
+    socket.on('auto-reconnect-status', (enabled) => updateAutoReconnectUI(enabled));
 
     fetch('/api/state')
         .then(res => res.json())
@@ -305,10 +357,12 @@
                 versionInput.value = data.config.version || '';
                 saveConfig();
             }
+            if (typeof data.autoReconnectEnabled === 'boolean') {
+                updateAutoReconnectUI(data.autoReconnectEnabled);
+            }
         })
         .catch(err => console.error('Durum yüklenirken hata:', err));
 
-    // Terminal TXT indir
     function downloadTerminal() {
         const link = document.createElement('a');
         link.href = '/api/terminal/download';
@@ -318,7 +372,6 @@
         document.body.removeChild(link);
     }
 
-    // --- Sohbet ---
     function openChatModal() { document.getElementById('chatModal').classList.add('active'); loadChatLogs(); }
     function closeChatModal() { document.getElementById('chatModal').classList.remove('active'); }
 
@@ -380,7 +433,6 @@
             .catch(err => alert('İstek hatası: ' + err));
     }
 
-    // --- Oyuncular ---
     function openPlayersModal() {
         const list = document.getElementById('playersList');
         list.innerHTML = '<div class="chat-empty">Yükleniyor...</div>';
@@ -425,7 +477,6 @@
         document.getElementById('clearUsername').focus();
     }
 
-    // --- Eşya Verme ---
     function giveItem() {
         const username = document.getElementById('giveUsername').value.trim();
         const item = document.getElementById('giveItem').value.trim();
@@ -466,7 +517,6 @@
         .catch(err => alert('İstek hatası: ' + err));
     }
 
-    // --- Envanter Görüntüleme ---
     function viewInventory(username, target) {
         currentInvUsername = username;
         currentInvTarget = target;
@@ -541,7 +591,6 @@
         .catch(err => alert('İndirme hatası: ' + err.message));
     }
 
-    // --- Oyuncu Mesajları ---
     function viewPlayerChat(username) {
         currentPlayerChatUsername = username;
         const content = document.getElementById('playerChatContent');
@@ -571,14 +620,12 @@
         document.body.removeChild(link);
     }
 
-    // Modal dışına tıklayınca kapat
     ['chatModal', 'playersModal', 'inventoryModal', 'playerChatModal'].forEach(id => {
         document.getElementById(id).addEventListener('click', (e) => {
             if (e.target.id === id) document.getElementById(id).classList.remove('active');
         });
     });
 
-    // --- Bot Kontrol ---
     function startBot() {
         const config = {
             host: hostInput.value, port: portInput.value,
