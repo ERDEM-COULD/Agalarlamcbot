@@ -77,16 +77,18 @@
         .form-row { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
         .form-row > div { flex: 1; min-width: 130px; }
 
-        /* 🆕 Otomatik yeniden bağlanma toggle */
+        /* Toggle switch satırları */
         .auto-reconnect-row { display: flex; align-items: center; gap: 10px; padding: 10px 15px; background: #252525; border-radius: 6px; margin-top: 15px; border-left: 3px solid #2196F3; }
         .auto-reconnect-row label { cursor: pointer; font-weight: bold; user-select: none; }
-        .switch { position: relative; display: inline-block; width: 50px; height: 26px; }
+        .switch { position: relative; display: inline-block; width: 50px; height: 26px; flex-shrink: 0; }
         .switch input { opacity: 0; width: 0; height: 0; }
         .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; transition: .3s; border-radius: 26px; }
         .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
         input:checked + .slider { background-color: #4CAF50; }
         input:checked + .slider:before { transform: translateX(24px); }
-        .auto-reconnect-status { font-size: 13px; color: #888; }
+        .auto-reconnect-status { font-size: 13px; color: #888; margin-left: auto; }
+        .hourly-restart-row { display: flex; align-items: center; gap: 10px; padding: 10px 15px; background: #252525; border-radius: 6px; margin-top: 10px; border-left: 3px solid #ff9800; }
+        .hourly-restart-status { font-size: 13px; color: #888; margin-left: auto; }
     </style>
 </head>
 <body>
@@ -127,7 +129,7 @@
             <button class="btn-players" onclick="openPlayersModal()">Oyuncuları Gör</button>
         </div>
 
-        <!-- 🆕 Otomatik Yeniden Bağlanma Anahtarı -->
+        <!-- Otomatik Yeniden Bağlanma Anahtarı -->
         <div class="auto-reconnect-row">
             <label class="switch">
                 <input type="checkbox" id="autoReconnectToggle" checked onchange="toggleAutoReconnect()">
@@ -137,6 +139,18 @@
                 Otomatik Yeniden Bağlanma (5 saniye içinde)
             </label>
             <span id="autoReconnectStatus" class="auto-reconnect-status">Aktif</span>
+        </div>
+
+        <!-- 🆕 Saatlik Çık-Gir Anahtarı -->
+        <div class="hourly-restart-row">
+            <label class="switch">
+                <input type="checkbox" id="hourlyRestartToggle" checked onchange="toggleHourlyRestart()">
+                <span class="slider"></span>
+            </label>
+            <label for="hourlyRestartToggle" onclick="document.getElementById('hourlyRestartToggle').click();">
+                Saatlik Çık-Gir (her 60 dakikada bir)
+            </label>
+            <span id="hourlyRestartStatus" class="hourly-restart-status">Aktif</span>
         </div>
     </div>
 
@@ -262,6 +276,8 @@
 
     const autoReconnectToggle = document.getElementById('autoReconnectToggle');
     const autoReconnectStatus = document.getElementById('autoReconnectStatus');
+    const hourlyRestartToggle = document.getElementById('hourlyRestartToggle');
+    const hourlyRestartStatus = document.getElementById('hourlyRestartStatus');
 
     if (localStorage.getItem('mc_bot_config')) {
         const saved = JSON.parse(localStorage.getItem('mc_bot_config'));
@@ -311,14 +327,12 @@
         timerInterval = setInterval(tick, 1000);
     }
 
-    // 🆕 Otomatik yeniden bağlanma durumunu güncelle
     function updateAutoReconnectUI(enabled) {
         autoReconnectToggle.checked = enabled;
         autoReconnectStatus.textContent = enabled ? 'Aktif' : 'Kapalı';
         autoReconnectStatus.style.color = enabled ? '#4CAF50' : '#f44336';
     }
 
-    // 🆕 Otomatik yeniden bağlanma toggle
     function toggleAutoReconnect() {
         const enabled = autoReconnectToggle.checked;
         fetch('/api/auto-reconnect', {
@@ -327,12 +341,33 @@
             body: JSON.stringify({ enabled })
         })
         .then(res => res.json())
-        .then(data => {
-            updateAutoReconnectUI(data.autoReconnectEnabled);
-        })
+        .then(data => { updateAutoReconnectUI(data.autoReconnectEnabled); })
         .catch(err => {
             alert('İstek hatası: ' + err);
-            autoReconnectToggle.checked = !enabled; // Geri al
+            autoReconnectToggle.checked = !enabled;
+        });
+    }
+
+    // 🆕 Saatlik çık-gir UI güncelleme
+    function updateHourlyRestartUI(enabled) {
+        hourlyRestartToggle.checked = enabled;
+        hourlyRestartStatus.textContent = enabled ? 'Aktif' : 'Kapalı';
+        hourlyRestartStatus.style.color = enabled ? '#4CAF50' : '#f44336';
+    }
+
+    // 🆕 Saatlik çık-gir toggle
+    function toggleHourlyRestart() {
+        const enabled = hourlyRestartToggle.checked;
+        fetch('/api/hourly-restart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        })
+        .then(res => res.json())
+        .then(data => { updateHourlyRestartUI(data.hourlyRestartEnabled); })
+        .catch(err => {
+            alert('İstek hatası: ' + err);
+            hourlyRestartToggle.checked = !enabled;
         });
     }
 
@@ -343,6 +378,7 @@
     });
     socket.on('terminal-log', (msg) => addLogToTerminal(msg));
     socket.on('auto-reconnect-status', (enabled) => updateAutoReconnectUI(enabled));
+    socket.on('hourly-restart-status', (enabled) => updateHourlyRestartUI(enabled));  // 🆕
 
     fetch('/api/state')
         .then(res => res.json())
@@ -359,6 +395,9 @@
             }
             if (typeof data.autoReconnectEnabled === 'boolean') {
                 updateAutoReconnectUI(data.autoReconnectEnabled);
+            }
+            if (typeof data.hourlyRestartEnabled === 'boolean') {   // 🆕
+                updateHourlyRestartUI(data.hourlyRestartEnabled);
             }
         })
         .catch(err => console.error('Durum yüklenirken hata:', err));
@@ -628,9 +667,17 @@
 
     function startBot() {
         const config = {
-            host: hostInput.value, port: portInput.value,
-            username: usernameInput.value, version: versionInput.value || undefined
+            host: hostInput.value.trim(),
+            port: portInput.value.trim(),
+            username: usernameInput.value.trim(),
+            version: versionInput.value.trim() || undefined
         };
+        
+        if (!config.host || !config.username) {
+            alert('Sunucu adresi ve bot adı zorunludur.');
+            return;
+        }
+        
         saveConfig();
         fetch('/api/start', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
