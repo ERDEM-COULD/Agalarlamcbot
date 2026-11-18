@@ -20,8 +20,10 @@ let moveInterval = null;
 let moveTimeout1 = null;
 let moveTimeout2 = null;
 let reconnectTimeout = null;
+let hourlyRestartInterval = null;   // 🆕 Saatlik çık-gir zamanlayıcısı
 let manualStop = false;
-let autoReconnectEnabled = true; // 🆕 Otomatik yeniden bağlanma aç/kapa
+let autoReconnectEnabled = true;
+let hourlyRestartEnabled = true;    // 🆕 Saatlik çık-gir aç/kapa (varsayılan: açık)
 let currentConfig = { host: '', port: 25565, username: 'Bot', version: false };
 
 let logHistory = [];
@@ -104,8 +106,75 @@ function clearReconnectTimer() {
     }
 }
 
+// 🆕 Saatlik çık-gir zamanlayıcısını temizle
+function clearHourlyRestartTimer() {
+    if (hourlyRestartInterval) {
+        clearInterval(hourlyRestartInterval);
+        hourlyRestartInterval = null;
+        addLog('Saatlik çık-gir zamanlayıcısı durduruldu.');
+    }
+}
+
+// 🆕 Saatlik çık-gir zamanlayıcısını başlat
+function startHourlyRestartTimer() {
+    clearHourlyRestartTimer();
+    if (!hourlyRestartEnabled) {
+        addLog('Saatlik çık-gir kapalı, zamanlayıcı başlatılmadı.');
+        return;
+    }
+    addLog('Saatlik çık-gir zamanlayıcısı başlatıldı (her 60 dakikada bir).');
+    
+    hourlyRestartInterval = setInterval(() => {
+        if (!hourlyRestartEnabled) return;
+        if (!bot || botStatus !== 'online') {
+            addLog('Saatlik çık-gir: Bot çevrimiçi değil, atlanıyor.');
+            return;
+        }
+        addLog('⏰ Saatlik çık-gir tetiklendi. Bot oyundan çıkarılıyor...');
+        performHourlyRestart();
+    }, 60 * 60 * 1000); // 1 saat = 60 * 60 * 1000 ms
+}
+
+// 🆕 Saatlik çık-gir işlemi
+function performHourlyRestart() {
+    if (!bot) {
+        addLog('Saatlik çık-gir: Bot yok, işlem iptal.');
+        return;
+    }
+    
+    const configToUse = { ...currentConfig };
+    
+    // Botu çıkar (otomatik yeniden bağlanmayı engellemek için manualStop kullanmıyoruz,
+    // çünkü saatlik çık-gir sonrası kendi tekrar bağlanma mantığımız var)
+    clearMovement();
+    try { bot.quit(); } catch (e) {}
+    bot = null;
+    botStatus = 'offline';
+    connectionStartTime = null;
+    io.emit('bot-status', botStatus);
+    io.emit('connection-time', null);
+    addLog('Bot oyundan çıkarıldı. 10 saniye sonra tekrar girilecek...');
+    
+    // 10 saniye sonra tekrar bağlan
+    setTimeout(() => {
+        if (configToUse.host && configToUse.username) {
+            addLog('Saatlik çık-gir sonrası yeniden bağlanılıyor...');
+            // manualStop'u geçici olarak false yap ki startBot çalışsın
+            manualStop = false;
+            startBot(configToUse);
+        } else {
+            addLog('Saatlik çık-gir: Geçerli konfigürasyon yok, yeniden bağlanılamadı.');
+        }
+    }, 10000); // 10 saniye bekle
+}
+
 function startBot(config) {
     if (bot) { addLog('Bot zaten çalışıyor, tekrar başlatma iptal edildi.'); return; }
+
+    // 🆕 Boşlukları temizle
+    config.host = (config.host || '').trim();
+    config.username = (config.username || '').trim();
+    config.version = (config.version || '').trim() || false;
 
     manualStop = false;
     clearReconnectTimer();
@@ -139,6 +208,9 @@ function startBot(config) {
                 catch (e) { addLog('Fizik motoru etkinleştirme hatası: ' + e.message); }
                 startMovement();
             }, 3000);
+
+            // 🆕 Her spawn'da saatlik zamanlayıcıyı başlat (yeniden başlat)
+            startHourlyRestartTimer();
         });
 
         bot.on('end', (reason) => {
@@ -150,9 +222,9 @@ function startBot(config) {
             io.emit('bot-status', botStatus);
             io.emit('connection-time', null);
 
-            // 🆕 Otomatik yeniden bağlanma kontrolü
             if (manualStop) {
                 addLog('Otomatik yeniden bağlanma devre dışı (manuel durdurma).');
+                clearHourlyRestartTimer();
                 return;
             }
             if (!autoReconnectEnabled) {
@@ -217,7 +289,8 @@ function stopBot(manual = true) {
 
     if (manual) {
         manualStop = true;
-        addLog('Bot durduruluyor... (otomatik yeniden bağlanma devre dışı)');
+        clearHourlyRestartTimer();  // 🆕 Manuel durdurmada saatlik zamanlayıcıyı da durdur
+        addLog('Bot durduruluyor... (otomatik yeniden bağlanma ve saatlik çık-gir devre dışı)');
     }
 
     if (bot) {
@@ -319,11 +392,12 @@ app.get('/api/state', (req, res) => {
         startTime: connectionStartTime,
         logs: logHistory,
         config: currentConfig,
-        autoReconnectEnabled: autoReconnectEnabled // 🆕 Durumu frontend'e bildir
+        autoReconnectEnabled: autoReconnectEnabled,
+        hourlyRestartEnabled: hourlyRestartEnabled   // 🆕
     });
 });
 
-// 🆕 Otomatik yeniden bağlanma aç/kapa
+// Otomatik yeniden bağlanma aç/kapa
 app.post('/api/auto-reconnect', (req, res) => {
     const { enabled } = req.body;
     autoReconnectEnabled = !!enabled;
@@ -334,6 +408,25 @@ app.post('/api/auto-reconnect', (req, res) => {
     }
     io.emit('auto-reconnect-status', autoReconnectEnabled);
     res.json({ autoReconnectEnabled });
+});
+
+// 🆕 Saatlik çık-gir aç/kapa
+app.post('/api/hourly-restart', (req, res) => {
+    const { enabled } = req.body;
+    hourlyRestartEnabled = !!enabled;
+    addLog(`Saatlik çık-gir ${hourlyRestartEnabled ? 'AÇILDI' : 'KAPATILDI'}.`);
+    
+    if (hourlyRestartEnabled) {
+        // Bot çevrimiçiyse zamanlayıcıyı yeniden başlat
+        if (bot && botStatus === 'online') {
+            startHourlyRestartTimer();
+        }
+    } else {
+        clearHourlyRestartTimer();
+    }
+    
+    io.emit('hourly-restart-status', hourlyRestartEnabled);
+    res.json({ hourlyRestartEnabled });
 });
 
 // Terminal TXT indir
@@ -617,9 +710,23 @@ app.post('/api/clear-chat-logs', (req, res) => {
 });
 
 app.post('/api/start', (req, res) => {
-    const { host, port, username, version } = req.body;
-    if (!host || !username) return res.status(400).json({ error: 'Sunucu adresi ve bot adı zorunludur.' });
-    if (botStatus === 'online' || botStatus === 'starting') return res.status(400).json({ error: 'Bot zaten çalışıyor.' });
+    let { host, port, username, version } = req.body;
+    
+    // 🆕 Temizle ve doğrula
+    host = (host || '').trim();
+    username = (username || '').trim();
+    version = (version || '').trim() || undefined;
+    
+    if (!host || !username) {
+        return res.status(400).json({ error: 'Sunucu adresi ve bot adı zorunludur.' });
+    }
+    if (host.includes(' ')) {
+        return res.status(400).json({ error: 'Sunucu adresi boşluk içeremez.' });
+    }
+    if (botStatus === 'online' || botStatus === 'starting') {
+        return res.status(400).json({ error: 'Bot zaten çalışıyor.' });
+    }
+    
     startBot({ host, port: port || 25565, username, version });
     res.json({ message: 'Başlatma komutu alındı.' });
 });
@@ -636,6 +743,7 @@ app.post('/api/reboot', (req, res) => {
 
     manualStop = true;
     clearReconnectTimer();
+    clearHourlyRestartTimer();
     clearMovement();
 
     if (bot) { try { bot.quit(); } catch (e) {} bot = null; }
@@ -661,6 +769,7 @@ io.on('connection', (socket) => {
     socket.emit('bot-status', botStatus);
     socket.emit('connection-time', connectionStartTime);
     socket.emit('auto-reconnect-status', autoReconnectEnabled);
+    socket.emit('hourly-restart-status', hourlyRestartEnabled);  // 🆕
 });
 
 const PORT = process.env.PORT || 3000;
